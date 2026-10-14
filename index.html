@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Diorama Pokébola</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #111;
+      font-family: system-ui, sans-serif;
+    }
+    #canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    #controles {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.55);
+      color: #fff;
+      font-size: 13px;
+      line-height: 1.5;
+      pointer-events: none;
+    }
+    kbd {
+      background: #333;
+      border-radius: 4px;
+      padding: 1px 6px;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+
+  <div id="controles">
+    <div><kbd>1</kbd> / <kbd>2</kbd> trocar câmera</div>
+    <div><kbd>P</kbd> trocar pose</div>
+    <div><kbd>L</kbd> ligar/desligar luz</div>
+    <div>Scroll: zoom &nbsp;|&nbsp; Mouse: orbitar</div>
+  </div>
+
+  <!-- TWGL.js (versão completa, expõe a variável global "twgl") -->
+  <script src="https://cdn.jsdelivr.net/npm/twgl.js@5/dist/5.x/twgl-full.min.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>
