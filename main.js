@@ -31,6 +31,81 @@ function criarObjeto({
   return { bufferInfo, position, rotation, scale, color, texture };
 }
 
+// ---------- Câmeras ----------
+const camState = {
+  ativa: 1,                      // 1 = automática, 2 = orbital
+  raio: 12,                      // distância ao alvo (scroll)
+  yaw: 0.8,                      // câmera 2 (rad)
+  pitch: 0.5,                    // câmera 2 (rad)
+  alvo: [0, 0, 0],
+};
+const RAIO_MIN = 4;
+const RAIO_MAX = 30;
+const ELEVACAO_AUTO = Math.PI / 4;            // 45°
+const VELOCIDADE_AUTO = 0.3;                  // rad/s
+const PITCH_MAX = (85 * Math.PI) / 180;
+
+// Posição do olho em coordenadas esféricas ao redor do alvo
+function posicaoOlho(yaw, pitch, raio, alvo) {
+  return [
+    alvo[0] + raio * Math.cos(pitch) * Math.cos(yaw),
+    alvo[1] + raio * Math.sin(pitch),
+    alvo[2] + raio * Math.cos(pitch) * Math.sin(yaw),
+  ];
+}
+
+function calcularView(time) {
+  const yaw = camState.ativa === 1 ? time * VELOCIDADE_AUTO : camState.yaw;
+  const pitch = camState.ativa === 1 ? ELEVACAO_AUTO : camState.pitch;
+  const olho = posicaoOlho(yaw, pitch, camState.raio, camState.alvo);
+  const camera = m4.lookAt(olho, camState.alvo, [0, 1, 0]);
+  return m4.inverse(camera);
+}
+
+const NOMES_CAMERA = {
+  1: "1 (automática)",
+  2: "2 (orbital)",
+};
+
+function configurarControles(canvas) {
+  const hudCamera = document.getElementById("camera-ativa");
+
+  function selecionarCamera(n) {
+    console.log("Camera ativa " + n); // Teste do listener
+    camState.ativa = n;
+    hudCamera.textContent = NOMES_CAMERA[n];
+  }
+  selecionarCamera(camState.ativa); // texto inicial
+
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "1" || e.code === "Digit1" || e.code === "Numpad1") {
+      selecionarCamera(1);
+    }
+    if (e.key === "2" || e.code === "Digit2" || e.code === "Numpad2") {
+      selecionarCamera(2);
+    }
+  });
+
+  // Scroll: aproxima/afasta (vale para as duas câmeras)
+  canvas.addEventListener(
+    "wheel",
+    (e) => {
+      e.preventDefault();
+      camState.raio *= 1 + e.deltaY * 0.001;
+      camState.raio = Math.min(RAIO_MAX, Math.max(RAIO_MIN, camState.raio));
+    },
+    { passive: false }
+  );
+
+  // Mouse: orbita a câmera 2 enquanto o botão esquerdo está pressionado
+  canvas.addEventListener("pointermove", (e) => {
+    if (camState.ativa !== 2 || !(e.buttons & 1)) return;
+    camState.yaw -= e.movementX * 0.005;
+    camState.pitch += e.movementY * 0.005;
+    camState.pitch = Math.min(PITCH_MAX, Math.max(-PITCH_MAX, camState.pitch));
+  });
+}
+
 async function main() {
   // 1.Contexto e inicialização
   const canvas = document.getElementById("canvas");
@@ -51,6 +126,7 @@ async function main() {
   gl.clearColor(0.53, 0.81, 0.92, 1.0); // céu azul claro
   
   twgl.setDefaults({ attribPrefix: "a_" });
+  configurarControles(canvas);
 
   // 2. Shaders
   const [vs, fs] = await Promise.all([
@@ -113,8 +189,7 @@ async function main() {
     // Câmera fixa provisória (substituída na Fase 2)
     const aspect = gl.canvas.width / gl.canvas.height;
     const projection = m4.perspective(Math.PI / 4, aspect, 0.1, 100);
-    const camera = m4.lookAt([6, 6, 9], [0, 0, 0], [0, 1, 0]);
-    const viewProjection = m4.multiply(projection, m4.inverse(camera));
+    const viewProjection = m4.multiply(projection, calcularView(time));
 
     // Animação de teste
     cena[0].rotation[1] = time;
