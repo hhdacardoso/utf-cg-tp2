@@ -2,6 +2,10 @@
 
 const m4 = twgl.m4;
 
+const ARQUIVOS_OBJ = {
+  arvore : "models/tree.obj",
+};
+
 // Matriz de modelo a partir de posição, rotação (rad) e escala.
 // Ordem: T * Ry * Rx * Rz * S
 function criarMatrizModelo({ position, rotation, scale }) {
@@ -106,6 +110,186 @@ function configurarControles(canvas) {
   });
 }
 
+// Disco no plano XZ (y = 0), normal +Y, centrado na origem.
+// Triângulos em sentido anti-horário visto de cima (compatível com CULL_FACE).
+function criarDisco(gl, raio, segmentos = 64) {
+  const position = [0, 0, 0];
+  const normal = [0, 1, 0];
+  const texcoord = [0.5, 0.5];
+  const indices = [];
+
+  for (let i = 0; i < segmentos; i++) {
+    const a = (i / segmentos) * Math.PI * 2;
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    position.push(raio * c, 0, raio * s);
+    normal.push(0, 1, 0);
+    texcoord.push(0.5 + 0.5 * c, 0.5 + 0.5 * s); // projeção planar
+  }
+
+  for (let i = 0; i < segmentos; i++) {
+    const atual = 1 + i;
+    const proximo = 1 + ((i + 1) % segmentos);
+    indices.push(0, proximo, atual);
+  }
+
+  return twgl.createBufferInfoFromArrays(gl, {
+    position: { numComponents: 3, data: position },
+    normal: { numComponents: 3, data: normal },
+    texcoord: { numComponents: 2, data: texcoord },
+    indices: indices,
+  });
+}
+
+// Textura do chão desenhada em canvas: gramado + anel branco + faixa preta.
+function criarTexturaChao(gl, tamanho = 1024) {
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = tamanho;
+  const ctx = cv.getContext("2d");
+  const c = tamanho / 2;
+
+  // Fundo: faixa preta (borda)
+  ctx.fillStyle = "#1a1a1a";
+  ctx.fillRect(0, 0, tamanho, tamanho);
+
+  // Anel branco fino
+  ctx.fillStyle = "#f2f2f2";
+  ctx.beginPath();
+  ctx.arc(c, c, c * 0.88, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Gramado
+  ctx.fillStyle = "#4caf50";
+  ctx.beginPath();
+  ctx.arc(c, c, c * 0.84, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Manchas de variação na grama (só dentro do gramado)
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(c, c, c * 0.84, 0, Math.PI * 2);
+  ctx.clip();
+  for (let i = 0; i < 2500; i++) {
+    const x = Math.random() * tamanho;
+    const y = Math.random() * tamanho;
+    const r = 2 + Math.random() * 6;
+    ctx.fillStyle = Math.random() < 0.5 ? "#3f9a44" : "#5dbb63";
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  return twgl.createTexture(gl, { src: cv, min: gl.LINEAR_MIPMAP_LINEAR });
+}
+
+// Hemisfério inferior (y <= 0), centrado na origem, equador em y = 0.
+// phi: latitude, 0 = equador, 90° = polo inferior.
+function criarHemisferio(gl, raio, stacks = 24, slices = 64) {
+  const position = [];
+  const normal = [];
+  const texcoord = [];
+  const indices = [];
+
+  for (let i = 0; i <= stacks; i++) {
+    const phi = (i / stacks) * (Math.PI / 2);
+    const cp = Math.cos(phi);
+    const sp = Math.sin(phi);
+
+    for (let j = 0; j <= slices; j++) {
+      const a = (j / slices) * Math.PI * 2;
+      const ca = Math.cos(a);
+      const sa = Math.sin(a);
+
+      // Normal = direção do centro até o vértice (esfera centrada na origem)
+      const nx = cp * ca;
+      const ny = -sp;
+      const nz = cp * sa;
+
+      position.push(raio * nx, raio * ny, raio * nz);
+      normal.push(nx, ny, nz);
+      texcoord.push(j / slices, i / stacks); // v: 0 = equador, 1 = polo
+    }
+  }
+
+  // j = slices repete o vértice de j = 0 (costura da textura)
+  const colunas = slices + 1;
+  for (let i = 0; i < stacks; i++) {
+    for (let j = 0; j < slices; j++) {
+      const A = i * colunas + j;
+      const B = A + 1;
+      const C = A + colunas;
+      const D = C + 1;
+      indices.push(A, B, C); // anti-horário visto de fora
+      indices.push(B, D, C);
+    }
+  }
+
+  return twgl.createBufferInfoFromArrays(gl, {
+    position: { numComponents: 3, data: position },
+    normal: { numComponents: 3, data: normal },
+    texcoord: { numComponents: 2, data: texcoord },
+    indices: indices,
+  });
+}
+
+// Textura 2048x512: u percorre a circunferência, v vai do equador (topo) ao polo.
+// Com raio 6, os pixels por unidade de mundo ficam iguais nos dois eixos.
+function criarTexturaHemisferio(gl) {
+  const W = 2048;
+  const H = 512;
+  const cv = document.createElement("canvas");
+  cv.width = W;
+  cv.height = H;
+  const ctx = cv.getContext("2d");
+
+  // Corpo branco
+  ctx.fillStyle = "#f4f4f4";
+  ctx.fillRect(0, 0, W, H);
+
+  // Faixa preta no equador (topo da imagem)
+  ctx.fillStyle = "#1a1a1a";
+  ctx.fillRect(0, 0, W, 56);
+
+  // Botão central em u = 0 (desenhado nas duas pontas para fechar a costura).
+  // Só a metade de baixo do círculo aparece, que é a que cabe no hemisfério.
+  for (const cx of [0, W]) {
+    const circulo = (r, cor) => {
+      ctx.fillStyle = cor;
+      ctx.beginPath();
+      ctx.arc(cx, 0, r, 0, Math.PI * 2);
+      ctx.fill();
+    };
+    circulo(100, "#1a1a1a"); // aro preto
+    circulo(72, "#f4f4f4");  // branco
+    circulo(48, "#cfcfcf");  // miolo cinza
+  }
+
+  return twgl.createTexture(gl, {
+    src: cv,
+    min: gl.LINEAR_MIPMAP_LINEAR,
+    wrapS: gl.REPEAT,
+    wrapT: gl.CLAMP_TO_EDGE,
+  });
+}
+
+async function carregarTexto(url) {
+  const resposta = await fetch(url);
+  if (!resposta.ok) throw new Error(`Falha ao carregar ${url}`);
+  return await resposta.text();
+}
+
+async function carregarModelos(gl, arquivos){
+  const nomes = Object.keys(arquivos);
+  const textos = await Promise.all(nomes.map((n) => carregarTexto(arquivos[n])));
+
+  const modelos = {};
+  nomes.forEach((nome, i) => {
+    modelos[nome] = textos[i]; // por enquanto, só o texto bruto
+  });
+  return modelos;
+}
+
 async function main() {
   // 1.Contexto e inicialização
   const canvas = document.getElementById("canvas");
@@ -134,6 +318,10 @@ async function main() {
     carregarShader("shaders/fragment.glsl"),
   ]);
   const programInfo = twgl.createProgramInfo(gl, [vs, fs]);
+
+  // Carregamento dos modelos dos objetos da cena
+  const modelos = await carregarModelos(gl, ARQUIVOS_OBJ);
+  console.log(Object.keys(modelos)); // ["arvore", "pedra"]
   
   // 3. Textura branca 1x1 (para objetos sem textura)
   const texBranca = twgl.createTexture(gl, {
@@ -153,13 +341,27 @@ async function main() {
     })
   );
   
-  // Chão provisório, só para dar referência espacial
+  const texChao = criarTexturaChao(gl);
+
+  // Chão: círculo da pokébola
   cena.push(
     criarObjeto({
-      bufferInfo: twgl.primitives.createCylinderBufferInfo(gl, 6, 0.2, 48, 1),
-      position: [0, -0.1, 0],
-      color: [0.3, 0.7, 0.3, 1],
-      texture: texBranca,
+      bufferInfo: criarDisco(gl, 6, 64),
+      position: [0, 0, 0],
+      color: [1, 1, 1, 1], // branco para não tingir a textura
+      texture: texChao,
+    })
+  );
+
+  const texHemisferio = criarTexturaHemisferio(gl);
+
+  // Hemisfério: "chão" da pokébola, mesmo raio do disco
+  cena.push(
+    criarObjeto({
+      bufferInfo: criarHemisferio(gl, 6, 24, 64),
+      position: [0, 0, 0],
+      color: [1, 1, 1, 1],
+      texture: texHemisferio,
     })
   );
   
