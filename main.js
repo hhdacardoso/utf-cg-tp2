@@ -3,7 +3,10 @@
 const m4 = twgl.m4;
 
 const ARQUIVOS_OBJ = {
-  arvore : "models/tree.obj",
+  arvore : {
+    obj:"models/tree.obj",
+    textura: "models/Textures/colormap.png",
+  }
 };
 
 // Matriz de modelo a partir de posição, rotação (rad) e escala.
@@ -279,15 +282,90 @@ async function carregarTexto(url) {
   return await resposta.text();
 }
 
-async function carregarModelos(gl, arquivos){
+async function carregarModelos(gl, arquivos) {
   const nomes = Object.keys(arquivos);
-  const textos = await Promise.all(nomes.map((n) => carregarTexto(arquivos[n])));
+  const textos = await Promise.all(nomes.map((n) => carregarTexto(arquivos[n].obj)));
 
   const modelos = {};
   nomes.forEach((nome, i) => {
-    modelos[nome] = textos[i]; // por enquanto, só o texto bruto
+    const bufferInfo = twgl.createBufferInfoFromArrays(gl, parseObj(textos[i]));
+    const texture = arquivos[nome].textura
+      ? twgl.createTexture(gl, {
+          src: arquivos[nome].textura,
+          min: gl.NEAREST, // paleta de cores: sem mistura entre vizinhas
+          mag: gl.NEAREST,
+        })
+      : null;
+    modelos[nome] = { bufferInfo, texture };
   });
   return modelos;
+}
+
+// Converte o texto de um .obj em arrays prontos para o TWGL.
+// Suporta faces v, v/vt, v//vn e v/vt/vn, índices negativos e polígonos
+// com mais de 3 vértices (triangulados em leque).
+function parseObj(texto) {
+  const pos = [];  // posições lidas ([x, y, z])
+  const uv = [];   // coordenadas de textura ([u, v])
+  const nor = [];  // normais ([x, y, z])
+
+  const position = [];
+  const normal = [];
+  const texcoord = [];
+  const indices = [];
+  const cache = new Map(); // "v/vt/vn" -> índice final (evita duplicar vértices)
+
+  // Converte o índice do OBJ (base 1, ou negativo = relativo ao fim) para base 0
+  const resolver = (s, tamanho) => {
+    if (!s) return -1;
+    const n = parseInt(s, 10);
+    return n > 0 ? n - 1 : tamanho + n;
+  };
+
+  // Gera (ou reaproveita) o vértice final correspondente a "v/vt/vn"
+  function vertice(token) {
+    if (cache.has(token)) return cache.get(token);
+
+    const [sv, svt, svn] = token.split("/");
+    const p = pos[resolver(sv, pos.length)];
+    const t = uv[resolver(svt, uv.length)] || [0, 0];
+    const n = nor[resolver(svn, nor.length)] || [0, 1, 0];
+
+    position.push(p[0], p[1], p[2]);
+    texcoord.push(t[0], t[1]);
+    normal.push(n[0], n[1], n[2]);
+
+    const idx = position.length / 3 - 1;
+    cache.set(token, idx);
+    return idx;
+  }
+
+  for (const linha of texto.split("\n")) {
+    const partes = linha.trim().split(/\s+/);
+    const tipo = partes[0];
+
+    if (tipo === "v") {
+      // Pode haver 3 números extras de cor (x y z r g b): ignorados
+      pos.push([+partes[1], +partes[2], +partes[3]]);
+    } else if (tipo === "vt") {
+      uv.push([+partes[1], +partes[2]]);
+    } else if (tipo === "vn") {
+      nor.push([+partes[1], +partes[2], +partes[3]]);
+    } else if (tipo === "f") {
+      const idx = partes.slice(1).map(vertice);
+      // Triangulação em leque: (0,1,2), (0,2,3), (0,3,4)...
+      for (let i = 1; i < idx.length - 1; i++) {
+        indices.push(idx[0], idx[i], idx[i + 1]);
+      }
+    }
+  }
+
+  return {
+    position: { numComponents: 3, data: position },
+    normal: { numComponents: 3, data: normal },
+    texcoord: { numComponents: 2, data: texcoord },
+    indices: indices,
+  };
 }
 
 async function main() {
@@ -338,6 +416,15 @@ async function main() {
       position: [0, 1, 0],
       color: [0.9, 0.3, 0.3, 1],
       texture: texBranca,
+    })
+  );
+
+  cena.push(
+    criarObjeto({
+      bufferInfo:modelos.arvore.bufferInfo,
+      texturePosition:modelos.arvore.texture,
+      position:[2.5, 0, 1],
+      scale:[3, 3, 3],
     })
   );
   
@@ -392,9 +479,6 @@ async function main() {
     const aspect = gl.canvas.width / gl.canvas.height;
     const projection = m4.perspective(Math.PI / 4, aspect, 0.1, 100);
     const viewProjection = m4.multiply(projection, calcularView(time));
-
-    // Animação de teste
-    cena[0].rotation[1] = time;
 
     gl.useProgram(programInfo.program);
     twgl.setUniforms(programInfo, {
