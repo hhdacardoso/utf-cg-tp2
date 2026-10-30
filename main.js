@@ -28,14 +28,15 @@ async function carregarShader(url) {
 
 // Cria um objeto de cena com valores padrão
 function criarObjeto({
-  bufferInfo,
+  bufferInfo = null,           // null = nó vazio (pivô)
   position = [0, 0, 0],
   rotation = [0, 0, 0],
   scale = [1, 1, 1],
   color = [1, 1, 1, 1],
   texture = null,
+  filhos = [],
 }) {
-  return { bufferInfo, position, rotation, scale, color, texture };
+  return { bufferInfo, position, rotation, scale, color, texture, filhos };
 }
 
 // ---------- Câmeras ----------
@@ -294,6 +295,7 @@ async function carregarModelos(gl, arquivos) {
           src: arquivos[nome].textura,
           min: gl.NEAREST, // paleta de cores: sem mistura entre vizinhas
           mag: gl.NEAREST,
+          flipY: true,
         })
       : null;
     modelos[nome] = { bufferInfo, texture };
@@ -368,6 +370,80 @@ function parseObj(texto) {
   };
 }
 
+function criarMoinho(gl, texBranca, posicao) {
+  const bufCubo = twgl.primitives.createCubeBufferInfo(gl, 1);
+  const bufEsfera = twgl.primitives.createSphereBufferInfo(gl, 1, 16, 12);
+  const bufTorre = twgl.primitives.createTruncatedConeBufferInfo(gl, 0.8, 0.5, 2.4, 24, 1);
+  const bufTelhado = twgl.primitives.createTruncatedConeBufferInfo(gl, 0.65, 0, 0.7, 24, 1);
+
+  const AMARELO_CLARO = [0.85, 0.8, 0.7, 1];
+  const TELHA = [0.6, 0.2, 0.15, 1];
+  const MADEIRA = [0.4, 0.25, 0.1, 1];
+  const TECIDO = [0.95, 0.95, 0.9, 1];
+
+  // Uma pá = pivô girado em Z, com braço e vela como filhos
+  const criarPa = (angulo) =>
+    criarObjeto({
+      rotation: [0, 0, angulo],
+      filhos: [
+        criarObjeto({
+          bufferInfo: bufCubo,
+          position: [0, 0.85, 0],
+          scale: [0.07, 1.7, 0.07],
+          color: MADEIRA,
+          texture: texBranca,
+        }),
+        criarObjeto({
+          bufferInfo: bufCubo,
+          position: [0.2, 1.05, 0.03],
+          scale: [0.3, 1.1, 0.03],
+          color: TECIDO,
+          texture: texBranca,
+        }),
+      ],
+    });
+
+  // Eixo: no topo da torre, na frente. É ele que gira.
+  const eixo = criarObjeto({
+    position: [0, 2.1, 0.62],
+    filhos: [
+      criarObjeto({
+        bufferInfo: bufEsfera,
+        scale: [0.15, 0.15, 0.15],
+        color: MADEIRA,
+        texture: texBranca,
+      }),
+      criarPa(0),
+      criarPa(Math.PI / 2),
+      criarPa(Math.PI),
+      criarPa((3 * Math.PI) / 2),
+    ],
+  });
+
+  // Raiz: orientada para o centro do diorama (+Z local aponta para o centro)
+  const raiz = criarObjeto({
+    position: posicao,
+    rotation: [0, Math.atan2(-posicao[0], -posicao[2]), 0],
+    filhos: [
+      criarObjeto({
+        bufferInfo: bufTorre,
+        position: [0, 1.2, 0], // metade da altura 2.4
+        color: AMARELO_CLARO,
+        texture: texBranca,
+      }),
+      criarObjeto({
+        bufferInfo: bufTelhado,
+        position: [0, 2.75, 0], // 2.4 + metade de 0.7
+        color: TELHA,
+        texture: texBranca,
+      }),
+      eixo,
+    ],
+  });
+
+  return { raiz, eixo };
+}
+
 async function main() {
   // 1.Contexto e inicialização
   const canvas = document.getElementById("canvas");
@@ -399,7 +475,6 @@ async function main() {
 
   // Carregamento dos modelos dos objetos da cena
   const modelos = await carregarModelos(gl, ARQUIVOS_OBJ);
-  console.log(Object.keys(modelos)); // ["arvore", "pedra"]
   
   // 3. Textura branca 1x1 (para objetos sem textura)
   const texBranca = twgl.createTexture(gl, {
@@ -409,24 +484,85 @@ async function main() {
   });
   // 4. Cena
   const cena = [];
-  
-  cena.push(
-    criarObjeto({
-      bufferInfo: twgl.primitives.createCubeBufferInfo(gl, 2),
-      position: [0, 1, 0],
-      color: [0.9, 0.3, 0.3, 1],
-      texture: texBranca,
-    })
-  );
 
+  // Inserção da árvore
   cena.push(
     criarObjeto({
       bufferInfo:modelos.arvore.bufferInfo,
-      texturePosition:modelos.arvore.texture,
+      texture:modelos.arvore.texture,
       position:[2.5, 0, 1],
       scale:[3, 3, 3],
     })
   );
+
+  // ---------- Cenário (primitivas) ----------
+// Buffers unitários compartilhados; o tamanho de cada instância vem do `scale`.
+const bufEsfera = twgl.primitives.createSphereBufferInfo(gl, 1, 24, 16);   // raio 1
+const bufCilindro = twgl.primitives.createCylinderBufferInfo(gl, 1, 1, 24, 1); // raio 1, altura 1
+const bufLagoa = criarDisco(gl, 1, 48);                                    // raio 1
+
+// Lagoa: disco azul um pouco acima do chão (y = 0.02) para evitar z-fighting
+cena.push(
+  criarObjeto({
+    bufferInfo: bufLagoa,
+    position: [-2.5, 0.02, -1.5],
+    scale: [1.8, 1, 1.8], // raio 1.8
+    color: [0.2, 0.5, 0.85, 1],
+    texture: texBranca,
+  })
+);
+
+// Arbustos: esferas achatadas, parcialmente enterradas no chão
+const arbustos = [
+  { x: 3.6, z: -2.2, r: 0.7 },
+  { x: -4.0, z: 1.5, r: 0.6 },
+  { x: 1.0, z: -4.0, r: 0.65 },
+  { x: 0.5, z: 4.0, r: 0.7 },
+  { x: 3.7, z: 2.4, r: 0.55 },
+  { x: -1.2, z: -3.4, r: 0.5 },
+];
+for (const a of arbustos) {
+  cena.push(
+    criarObjeto({
+      bufferInfo: bufEsfera,
+      position: [a.x, a.r * 0.45, a.z],
+      scale: [a.r, a.r * 0.7, a.r],
+      color: [0.12, 0.45, 0.18, 1],
+      texture: texBranca,
+    })
+  );
+}
+
+// Pedras: esferas achatadas e irregulares, cinza, com rotações diferentes
+const pedras = [
+  { x: 1.8, z: -2.5, s: [0.45, 0.3, 0.38], giro: 0.4 },
+  { x: -0.8, z: -3.7, s: [0.35, 0.25, 0.3], giro: 1.2 },
+  { x: 3.2, z: -0.6, s: [0.5, 0.35, 0.4], giro: 2.1 },
+  { x: -4.2, z: -0.3, s: [0.4, 0.28, 0.35], giro: 0.9 },
+];
+for (const p of pedras) {
+  cena.push(
+    criarObjeto({
+      bufferInfo: bufEsfera,
+      position: [p.x, p.s[1] * 0.6, p.z],
+      rotation: [0, p.giro, 0],
+      scale: p.s,
+      color: [0.5, 0.5, 0.52, 1],
+      texture: texBranca,
+    })
+  );
+}
+
+// Tonel: cilindro marrom em pé (raio 0.4, altura 0.8)
+cena.push(
+  criarObjeto({
+    bufferInfo: bufCilindro,
+    position: [-0.2, 0.4, -2.0],
+    scale: [0.4, 0.8, 0.4],
+    color: [0.45, 0.28, 0.12, 1],
+    texture: texBranca,
+  })
+);
   
   const texChao = criarTexturaChao(gl);
 
@@ -451,20 +587,31 @@ async function main() {
       texture: texHemisferio,
     })
   );
+
+  const VELOCIDADE_PAS = 1.5; // rad/s
+  const moinho = criarMoinho(gl, texBranca, [-2.5, 0, 2.8]);
+  cena.push(moinho.raiz);
   
   // 5. Desenho de um objeto
-  function desenharObjeto(obj, viewProjection) {
-    const world = criarMatrizModelo(obj);
+  function desenharObjeto(obj, viewProjection, matrizPai = m4.identity()) {
+    // Matriz de mundo = matriz do pai × matriz local
+    const world = m4.multiply(matrizPai, criarMatrizModelo(obj));
 
-    twgl.setBuffersAndAttributes(gl, programInfo, obj.bufferInfo);
-    twgl.setUniforms(programInfo, {
-      u_world: world,
-      u_viewProjection: viewProjection,
-      u_worldInverseTranspose: m4.transpose(m4.inverse(world)),
-      u_texture: obj.texture || texBranca,
-      u_color: obj.color,
-    });
-    twgl.drawBufferInfo(gl, obj.bufferInfo);
+    if (obj.bufferInfo) {
+      twgl.setBuffersAndAttributes(gl, programInfo, obj.bufferInfo);
+      twgl.setUniforms(programInfo, {
+        u_world: world,
+        u_viewProjection: viewProjection,
+        u_worldInverseTranspose: m4.transpose(m4.inverse(world)),
+        u_texture: obj.texture || texBranca,
+        u_color: obj.color,
+      });
+      twgl.drawBufferInfo(gl, obj.bufferInfo);
+    }
+
+    for (const filho of obj.filhos) {
+      desenharObjeto(filho, viewProjection, world);
+    }
   }
   
   // 6. Loop
@@ -488,6 +635,8 @@ async function main() {
     for (const obj of cena) {
       desenharObjeto(obj, viewProjection);
     }
+
+    moinho.eixo.rotation[2] = time * VELOCIDADE_PAS;
 
     requestAnimationFrame(render);
   }
