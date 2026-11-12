@@ -448,6 +448,46 @@ function criarMoinho(gl, texBranca, posicao) {
   return { raiz, eixo };
 }
 
+// Corrige a direção "frente" nativa do modelo para que ela vire +Z (ver tabela)
+const OFFSET_FRENTE = 0;
+const ESCALA_PERSONAGEM = 1.5;
+
+// Convenção das poses: yaw 0 = olhando para +Z; rotation = [pitch, yaw, roll]
+const POSES = [
+  {
+    nome: "em pé, olhando a lagoa",
+    pos: [0, 0, 0],
+    rot: [0, Math.atan2(-2.5, -1.5), 0],
+  },
+  {
+    nome: "na borda, olhando para fora",
+    pos: [4.6, 0, 0],
+    rot: [0, Math.PI / 2, 0],
+  },
+  {
+    nome: "deitado de barriga para cima",
+    pos: [0, 0.4, 0],            // ajuste o 0.4 se afundar ou flutuar
+    rot: [-Math.PI / 2, -Math.PI / 2, 0],
+  },
+];
+
+// Menor diferença entre dois ângulos, em [-π, π]
+function angCurto(de, para) {
+  let d = (para - de) % (2 * Math.PI);
+  if (d > Math.PI) d -= 2 * Math.PI;
+  if (d < -Math.PI) d += 2 * Math.PI;
+  return d;
+}
+
+// Aproxima suavemente o personagem da pose-alvo (suavização exponencial)
+function atualizarPose(personagem, alvo, dt) {
+  const k = 1 - Math.exp(-6 * dt);
+  for (let i = 0; i < 3; i++) {
+    personagem.position[i] += (alvo.pos[i] - personagem.position[i]) * k;
+    personagem.rotation[i] += angCurto(personagem.rotation[i], alvo.rot[i]) * k;
+  }
+}
+
 async function main() {
   // 1.Contexto e inicialização
   const canvas = document.getElementById("canvas");
@@ -501,13 +541,31 @@ async function main() {
 
   // Inserção do personagem
   const personagem = criarObjeto({
-    bufferInfo: modelos.personagem.bufferInfo,
-    texture: modelos.personagem.texture,
-    position: [0, 0, 0],
-    rotation: [0, 0, 0],
-    scale: [1.5, 1.5, 1.5],
+    position: [...POSES[0].pos],
+    rotation: [...POSES[0].rot],
+    filhos: [
+      criarObjeto({
+        bufferInfo: modelos.personagem.bufferInfo,
+        texture: modelos.personagem.texture,
+        rotation: [0, OFFSET_FRENTE, 0],
+        scale: [ESCALA_PERSONAGEM, ESCALA_PERSONAGEM, ESCALA_PERSONAGEM],
+      }),
+    ],
   });
   cena.push(personagem);
+
+  // Tecla P: avança para a próxima pose
+  let poseAtual = 0;
+  const hudPose = document.getElementById("pose-atual");
+  hudPose.textContent = POSES[poseAtual].nome;
+  window.addEventListener("keydown", (e) => {
+    if (e.code === "KeyP") {
+      poseAtual = (poseAtual + 1) % POSES.length;
+      hudPose.textContent = POSES[poseAtual].nome;
+    }
+  });
+
+  let tempoAnterior = 0;
 
   // ---------- Cenário (primitivas) ----------
 // Buffers unitários compartilhados; o tamanho de cada instância vem do `scale`.
@@ -651,6 +709,10 @@ cena.push(
     }
 
     moinho.eixo.rotation[2] = time * VELOCIDADE_PAS;
+
+    const dt = time - tempoAnterior;
+  tempoAnterior = time;
+  atualizarPose(personagem, POSES[poseAtual], dt);
 
     requestAnimationFrame(render);
   }
