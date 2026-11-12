@@ -6,7 +6,11 @@ const ARQUIVOS_OBJ = {
   arvore : {
     obj:"models/tree.obj",
     textura: "models/Textures/colormap.png",
-  }
+  },
+  personagem: { 
+    obj: "models/personagem.obj",
+    textura: "models/Textures/Atlas_Pirate.png" 
+  },
 };
 
 // Matriz de modelo a partir de posição, rotação (rad) e escala.
@@ -494,6 +498,16 @@ async function main() {
       scale:[3, 3, 3],
     })
   );
+
+  // Inserção do personagem
+  const personagem = criarObjeto({
+    bufferInfo: modelos.personagem.bufferInfo,
+    texture: modelos.personagem.texture,
+    position: [0, 0, 0],
+    rotation: [0, 0, 0],
+    scale: [1.5, 1.5, 1.5],
+  });
+  cena.push(personagem);
 
   // ---------- Cenário (primitivas) ----------
 // Buffers unitários compartilhados; o tamanho de cada instância vem do `scale`.
