@@ -30,6 +30,9 @@ async function carregarShader(url) {
   return await resposta.text();
 }
 
+// Material padrão: reproduz a iluminação simples anterior (sem brilho)
+const MATERIAL_PADRAO = { ambient: 0.3, diffuse: 0.7, specular: 0.0, shininess: 32 };
+
 // Cria um objeto de cena com valores padrão
 function criarObjeto({
   bufferInfo = null,           // null = nó vazio (pivô)
@@ -38,9 +41,10 @@ function criarObjeto({
   scale = [1, 1, 1],
   color = [1, 1, 1, 1],
   texture = null,
+  material = MATERIAL_PADRAO,
   filhos = [],
 }) {
-  return { bufferInfo, position, rotation, scale, color, texture, filhos };
+  return { bufferInfo, position, rotation, scale, color, texture, material, filhos };
 }
 
 // ---------- Câmeras ----------
@@ -66,10 +70,13 @@ function posicaoOlho(yaw, pitch, raio, alvo) {
   ];
 }
 
-function calcularView(time) {
+function calcularOlho(time) {
   const yaw = camState.ativa === 1 ? time * VELOCIDADE_AUTO : camState.yaw;
   const pitch = camState.ativa === 1 ? ELEVACAO_AUTO : camState.pitch;
-  const olho = posicaoOlho(yaw, pitch, camState.raio, camState.alvo);
+  return posicaoOlho(yaw, pitch, camState.raio, camState.alvo);
+}
+
+function calcularView(olho) {
   const camera = m4.lookAt(olho, camState.alvo, [0, 1, 0]);
   return m4.inverse(camera);
 }
@@ -565,6 +572,17 @@ async function main() {
     }
   });
 
+  // Tecla L: liga/desliga o modelo de iluminação
+  let luzLigada = true;
+  const hudLuz = document.getElementById("luz-estado");
+  hudLuz.textContent = "ligada";
+  window.addEventListener("keydown", (e) => {
+    if (e.code === "KeyL") {
+      luzLigada = !luzLigada;
+      hudLuz.textContent = luzLigada ? "ligada" : "desligada";
+    }
+  });
+
   let tempoAnterior = 0;
 
   // ---------- Cenário (primitivas) ----------
@@ -581,6 +599,7 @@ cena.push(
     scale: [1.8, 1, 1.8], // raio 1.8
     color: [0.2, 0.5, 0.85, 1],
     texture: texBranca,
+    material: { ambient: 0.3, diffuse: 0.7, specular: 0.9, shininess: 128 },
   })
 );
 
@@ -657,6 +676,7 @@ cena.push(
       position: [0, 0, 0],
       color: [1, 1, 1, 1],
       texture: texHemisferio,
+      material: { ambient: 0.3, diffuse: 0.7, specular: 0.5, shininess: 64 },
     })
   );
 
@@ -677,6 +697,10 @@ cena.push(
         u_worldInverseTranspose: m4.transpose(m4.inverse(world)),
         u_texture: obj.texture || texBranca,
         u_color: obj.color,
+        u_ambient: obj.material.ambient,
+        u_diffuse: obj.material.diffuse,
+        u_specular: obj.material.specular,
+        u_shininess: obj.material.shininess,
       });
       twgl.drawBufferInfo(gl, obj.bufferInfo);
     }
@@ -694,14 +718,18 @@ cena.push(
     gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    // Câmera fixa provisória (substituída na Fase 2)
     const aspect = gl.canvas.width / gl.canvas.height;
     const projection = m4.perspective(Math.PI / 4, aspect, 0.1, 100);
-    const viewProjection = m4.multiply(projection, calcularView(time));
+    const olho = calcularOlho(time);
+    const viewProjection = m4.multiply(projection, calcularView(olho));
 
     gl.useProgram(programInfo.program);
     twgl.setUniforms(programInfo, {
       u_lightDirection: [0.5, 1, 0.7],
+      u_lightColor: [1, 1, 1],
+      u_ambientLight: [1, 1, 1],
+      u_viewWorldPosition: olho,
+      u_lightingEnabled: luzLigada,
     });
 
     for (const obj of cena) {
