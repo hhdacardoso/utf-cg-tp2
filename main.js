@@ -33,6 +33,24 @@ async function carregarShader(url) {
 // Material padrão: reproduz a iluminação simples anterior (sem brilho)
 const MATERIAL_PADRAO = { ambient: 0.3, diffuse: 0.7, specular: 0.0, shininess: 32 };
 
+// Materiais reutilizáveis.
+// ambient/diffuse: quanto de cada luz o material absorve;
+// specular/shininess: intensidade e concentração do brilho.
+const MATERIAIS = {
+  fosco: MATERIAL_PADRAO,
+  folha: { ambient: 0.3, diffuse: 0.7, specular: 0.05, shininess: 8 },
+  pedra: { ambient: 0.3, diffuse: 0.7, specular: 0.15, shininess: 16 },
+  madeira: { ambient: 0.3, diffuse: 0.7, specular: 0.1, shininess: 16 },
+  parede: { ambient: 0.3, diffuse: 0.7, specular: 0.05, shininess: 8 },
+  telha: { ambient: 0.3, diffuse: 0.7, specular: 0.25, shininess: 32 },
+  tecido: { ambient: 0.35, diffuse: 0.65, specular: 0.0, shininess: 1 },
+  metal: { ambient: 0.25, diffuse: 0.6, specular: 0.8, shininess: 64 },
+  agua: { ambient: 0.3, diffuse: 0.7, specular: 0.9, shininess: 128 },
+  pokebola: { ambient: 0.3, diffuse: 0.7, specular: 0.5, shininess: 64 },
+  arvore: { ambient: 0.3, diffuse: 0.7, specular: 0.05, shininess: 8 },
+  personagem: { ambient: 0.3, diffuse: 0.7, specular: 0.2, shininess: 16 },
+};
+
 // Cria um objeto de cena com valores padrão
 function criarObjeto({
   bufferInfo = null,           // null = nó vazio (pivô)
@@ -288,6 +306,167 @@ function criarTexturaHemisferio(gl) {
   });
 }
 
+// Cria uma textura desenhando em um canvas (repete nas bordas)
+function criarTexturaCanvas(gl, largura, altura, desenhar) {
+  const cv = document.createElement("canvas");
+  cv.width = largura;
+  cv.height = altura;
+  desenhar(cv.getContext("2d"), largura, altura);
+
+  return twgl.createTexture(gl, {
+    src: cv,
+    min: gl.LINEAR_MIPMAP_LINEAR,
+    wrapS: gl.REPEAT,
+    wrapT: gl.REPEAT,
+  });
+}
+
+// Espalha manchas circulares aleatórias, sorteando a cor de uma lista
+function espalharManchas(ctx, w, h, quantidade, rMin, rMax, cores) {
+  for (let i = 0; i < quantidade; i++) {
+    ctx.fillStyle = cores[Math.floor(Math.random() * cores.length)];
+    ctx.beginPath();
+    ctx.arc(
+      Math.random() * w,
+      Math.random() * h,
+      rMin + Math.random() * (rMax - rMin),
+      0,
+      Math.PI * 2
+    );
+    ctx.fill();
+  }
+}
+
+// Folhagem: verde com manchas claras e escuras (arbustos)
+function criarTexturaFolhas(gl) {
+  return criarTexturaCanvas(gl, 512, 256, (ctx, w, h) => {
+    ctx.fillStyle = "#2e7d32";
+    ctx.fillRect(0, 0, w, h);
+    espalharManchas(ctx, w, h, 1500, 4, 10, [
+      "#1b5e20", "#388e3c", "#43a047", "#2e7d32",
+    ]);
+  });
+}
+
+// Pedra: cinza com manchas e algumas rachaduras
+function criarTexturaPedra(gl) {
+  return criarTexturaCanvas(gl, 512, 256, (ctx, w, h) => {
+    ctx.fillStyle = "#8a8a8e";
+    ctx.fillRect(0, 0, w, h);
+    espalharManchas(ctx, w, h, 1200, 3, 14, [
+      "#707074", "#9a9a9e", "#7c7c80", "#a8a8ac",
+    ]);
+
+    ctx.strokeStyle = "#4a4a4e";
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 10; i++) {
+      let x = Math.random() * w;
+      let y = Math.random() * h;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      for (let j = 0; j < 5; j++) {
+        x += (Math.random() - 0.5) * 40;
+        y += (Math.random() - 0.5) * 40;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+  });
+}
+
+// Madeira: tábuas verticais separadas por frestas, com veios
+function criarTexturaMadeira(gl) {
+  return criarTexturaCanvas(gl, 256, 256, (ctx, w, h) => {
+    ctx.fillStyle = "#8b5a2b";
+    ctx.fillRect(0, 0, w, h);
+
+    // Veios: linhas verticais finas, claras e escuras
+    for (let i = 0; i < 140; i++) {
+      ctx.strokeStyle = Math.random() < 0.5 ? "#7a4e22" : "#9c6a35";
+      ctx.lineWidth = 1 + Math.random() * 2;
+      const x = Math.random() * w;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x + (Math.random() - 0.5) * 6, h);
+      ctx.stroke();
+    }
+
+    // Frestas entre as tábuas
+    ctx.fillStyle = "#4a2e12";
+    for (let x = 0; x < w; x += 32) {
+      ctx.fillRect(x, 0, 3, h);
+    }
+  });
+}
+
+// Parede do moinho: reboco claro e manchado
+function criarTexturaParede(gl) {
+  return criarTexturaCanvas(gl, 256, 256, (ctx, w, h) => {
+    ctx.fillStyle = "#e8dcc0";
+    ctx.fillRect(0, 0, w, h);
+    espalharManchas(ctx, w, h, 800, 2, 8, [
+      "#ddd0b0", "#efe5cc", "#d6c8a6",
+    ]);
+  });
+}
+
+// Telhado do moinho: fileiras de telhas, cada uma deslocada da anterior
+function criarTexturaTelha(gl) {
+  return criarTexturaCanvas(gl, 256, 256, (ctx, w, h) => {
+    ctx.fillStyle = "#8e2f22";
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.fillStyle = "#5a1a12";
+    const altura = 32;
+    const largura = 32;
+    for (let linha = 0; linha < h / altura; linha++) {
+      const y = linha * altura;
+      ctx.fillRect(0, y, w, 3);
+      const deslocamento = linha % 2 === 0 ? 0 : largura / 2;
+      for (let x = deslocamento; x < w; x += largura) {
+        ctx.fillRect(x, y, 2, altura);
+      }
+    }
+  });
+}
+
+// Tecido das velas: trama fina em quadriculado
+function criarTexturaTecido(gl) {
+  return criarTexturaCanvas(gl, 128, 128, (ctx, w, h) => {
+    ctx.fillStyle = "#f2efe6";
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.fillStyle = "rgba(0, 0, 0, 0.07)";
+    for (let i = 0; i < w; i += 8) {
+      ctx.fillRect(i, 0, 1, h);
+      ctx.fillRect(0, i, w, 1);
+    }
+  });
+}
+
+// Água da lagoa: azul com variações de tom e marcas de ondulação
+function criarTexturaAgua(gl) {
+  return criarTexturaCanvas(gl, 512, 512, (ctx, w, h) => {
+    ctx.fillStyle = "#2a6fb8";
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.globalAlpha = 0.35;
+    espalharManchas(ctx, w, h, 60, 20, 60, ["#3b86d1", "#1f5fa5"]);
+
+    ctx.globalAlpha = 0.3;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 80; i++) {
+      const x = Math.random() * w;
+      const y = Math.random() * h;
+      ctx.beginPath();
+      ctx.ellipse(x, y, 8 + Math.random() * 14, 3 + Math.random() * 4, 0, 0, Math.PI);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  });
+}
+
 async function carregarTexto(url) {
   const resposta = await fetch(url);
   if (!resposta.ok) throw new Error(`Falha ao carregar ${url}`);
@@ -381,16 +560,11 @@ function parseObj(texto) {
   };
 }
 
-function criarMoinho(gl, texBranca, posicao) {
+function criarMoinho(gl, texturas, posicao) {
   const bufCubo = twgl.primitives.createCubeBufferInfo(gl, 1);
   const bufEsfera = twgl.primitives.createSphereBufferInfo(gl, 1, 16, 12);
   const bufTorre = twgl.primitives.createTruncatedConeBufferInfo(gl, 0.8, 0.5, 2.4, 24, 1);
   const bufTelhado = twgl.primitives.createTruncatedConeBufferInfo(gl, 0.65, 0, 0.7, 24, 1);
-
-  const AMARELO_CLARO = [0.85, 0.8, 0.7, 1];
-  const TELHA = [0.6, 0.2, 0.15, 1];
-  const MADEIRA = [0.4, 0.25, 0.1, 1];
-  const TECIDO = [0.95, 0.95, 0.9, 1];
 
   // Uma pá = pivô girado em Z, com braço e vela como filhos
   const criarPa = (angulo) =>
@@ -401,15 +575,15 @@ function criarMoinho(gl, texBranca, posicao) {
           bufferInfo: bufCubo,
           position: [0, 0.85, 0],
           scale: [0.07, 1.7, 0.07],
-          color: MADEIRA,
-          texture: texBranca,
+          texture: texturas.madeira,
+          material: MATERIAIS.madeira,
         }),
         criarObjeto({
           bufferInfo: bufCubo,
           position: [0.2, 1.05, 0.03],
           scale: [0.3, 1.1, 0.03],
-          color: TECIDO,
-          texture: texBranca,
+          texture: texturas.tecido,
+          material: MATERIAIS.tecido,
         }),
       ],
     });
@@ -421,8 +595,8 @@ function criarMoinho(gl, texBranca, posicao) {
       criarObjeto({
         bufferInfo: bufEsfera,
         scale: [0.15, 0.15, 0.15],
-        color: MADEIRA,
-        texture: texBranca,
+        texture: texturas.madeira,
+        material: MATERIAIS.madeira,
       }),
       criarPa(0),
       criarPa(Math.PI / 2),
@@ -439,14 +613,14 @@ function criarMoinho(gl, texBranca, posicao) {
       criarObjeto({
         bufferInfo: bufTorre,
         position: [0, 1.2, 0], // metade da altura 2.4
-        color: AMARELO_CLARO,
-        texture: texBranca,
+        texture: texturas.parede,
+        material: MATERIAIS.parede,
       }),
       criarObjeto({
         bufferInfo: bufTelhado,
         position: [0, 2.75, 0], // 2.4 + metade de 0.7
-        color: TELHA,
-        texture: texBranca,
+        texture: texturas.telha,
+        material: MATERIAIS.telha,
       }),
       eixo,
     ],
@@ -533,6 +707,17 @@ async function main() {
     min: gl.NEAREST,
     mag: gl.NEAREST,
   });
+  // Texturas procedurais do cenário
+  const texturas = {
+    folhas: criarTexturaFolhas(gl),
+    pedra: criarTexturaPedra(gl),
+    madeira: criarTexturaMadeira(gl),
+    parede: criarTexturaParede(gl),
+    telha: criarTexturaTelha(gl),
+    tecido: criarTexturaTecido(gl),
+    agua: criarTexturaAgua(gl),
+  };
+
   // 4. Cena
   const cena = [];
 
@@ -543,6 +728,7 @@ async function main() {
       texture:modelos.arvore.texture,
       position:[2.5, 0, 1],
       scale:[3, 3, 3],
+      material: MATERIAIS.arvore,
     })
   );
 
@@ -556,6 +742,7 @@ async function main() {
         texture: modelos.personagem.texture,
         rotation: [0, OFFSET_FRENTE, 0],
         scale: [ESCALA_PERSONAGEM, ESCALA_PERSONAGEM, ESCALA_PERSONAGEM],
+        material: MATERIAIS.personagem,
       }),
     ],
   });
@@ -597,9 +784,8 @@ cena.push(
     bufferInfo: bufLagoa,
     position: [-2.5, 0.02, -1.5],
     scale: [1.8, 1, 1.8], // raio 1.8
-    color: [0.2, 0.5, 0.85, 1],
-    texture: texBranca,
-    material: { ambient: 0.3, diffuse: 0.7, specular: 0.9, shininess: 128 },
+    texture: texturas.agua,
+    material: MATERIAIS.agua,
   })
 );
 
@@ -618,8 +804,8 @@ for (const a of arbustos) {
       bufferInfo: bufEsfera,
       position: [a.x, a.r * 0.45, a.z],
       scale: [a.r, a.r * 0.7, a.r],
-      color: [0.12, 0.45, 0.18, 1],
-      texture: texBranca,
+      texture: texturas.folhas,
+      material: MATERIAIS.folha,
     })
   );
 }
@@ -638,8 +824,8 @@ for (const p of pedras) {
       position: [p.x, p.s[1] * 0.6, p.z],
       rotation: [0, p.giro, 0],
       scale: p.s,
-      color: [0.5, 0.5, 0.52, 1],
-      texture: texBranca,
+      texture: texturas.pedra,
+      material: MATERIAIS.pedra,
     })
   );
 }
@@ -650,8 +836,19 @@ cena.push(
     bufferInfo: bufCilindro,
     position: [-0.2, 0.4, -2.0],
     scale: [0.4, 0.8, 0.4],
-    color: [0.45, 0.28, 0.12, 1],
-    texture: texBranca,
+    texture: texturas.madeira,
+    material: MATERIAIS.madeira,
+    // Dois aros de metal em volta do tonel
+    filhos: [-0.3, 0.3].map((y) =>
+      criarObjeto({
+        bufferInfo: bufCilindro,
+        position: [0, y, 0],
+        scale: [1.06, 0.08, 1.06],
+        color: [0.25, 0.25, 0.28, 1],
+        texture: texBranca,
+        material: MATERIAIS.metal,
+      })
+    ),
   })
 );
   
@@ -676,12 +873,12 @@ cena.push(
       position: [0, 0, 0],
       color: [1, 1, 1, 1],
       texture: texHemisferio,
-      material: { ambient: 0.3, diffuse: 0.7, specular: 0.5, shininess: 64 },
+      material: MATERIAIS.pokebola,
     })
   );
 
   const VELOCIDADE_PAS = 1.5; // rad/s
-  const moinho = criarMoinho(gl, texBranca, [-2.5, 0, 2.8]);
+  const moinho = criarMoinho(gl, texturas, [-2.5, 0, 2.8]);
   cena.push(moinho.raiz);
   
   // 5. Desenho de um objeto
