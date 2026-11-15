@@ -13,6 +13,9 @@ const ARQUIVOS_OBJ = {
   },
 };
 
+// Tronco caído: cilindro deitado ao longo do eixo X
+const TRONCO = { x: 0.2, z: 2.0, raio: 0.38, comprimento: 2.0 };
+
 // Matriz de modelo a partir de posição, rotação (rad) e escala.
 // Ordem: T * Ry * Rx * Rz * S
 function criarMatrizModelo({ position, rotation, scale }) {
@@ -641,14 +644,15 @@ const POSES = [
     rot: [0, Math.atan2(-2.5, -1.5), 0],
   },
   {
-    nome: "na borda, olhando para fora",
-    pos: [4.6, 0, 0],
-    rot: [0, Math.PI / 2, 0],
-  },
-  {
     nome: "deitado de barriga para cima",
     pos: [0, 0.4, 0],            // ajuste o 0.4 se afundar ou flutuar
     rot: [-Math.PI / 2, -Math.PI / 2, 0],
+  },
+  {
+    nome: "sentado no tronco",
+    // quadril (≈0.38 do modelo × escala) na altura do topo do tronco
+    pos: [TRONCO.x, 2 * TRONCO.raio - 0.38 * ESCALA_PERSONAGEM + 0.4, TRONCO.z - 0.3],
+    rot: [0, Math.PI, 0], // de frente para o centro do diorama
   },
 ];
 
@@ -786,6 +790,17 @@ cena.push(
     scale: [1.8, 1, 1.8], // raio 1.8
     texture: texturas.agua,
     material: MATERIAIS.agua,
+  })
+);
+
+cena.push(
+  criarObjeto({
+    bufferInfo: bufCilindro,
+    position: [TRONCO.x, TRONCO.raio, TRONCO.z],
+    rotation: [0, 0, Math.PI / 2], // deita o cilindro: eixo Y vira eixo X
+    scale: [TRONCO.raio, TRONCO.comprimento, TRONCO.raio],
+    texture: texturas.madeira,
+    material: MATERIAIS.madeira,
   })
 );
 
