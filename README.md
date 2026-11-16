@@ -16,6 +16,7 @@ Um minimundo em forma de pokébola: um disco gramado sobre um hemisfério branco
 | `P` | Alterna a pose do personagem (3 poses) |
 | `L` | Liga/desliga o modelo de iluminação |
 | `N` | Liga/desliga a neblina |
+| Clique no violão | Toca/para a música |
 
 ## (b) Criador(es)
 
@@ -36,7 +37,7 @@ Um minimundo em forma de pokébola: um disco gramado sobre um hemisfério branco
 
 Itens opcionais implementados (texto copiado do enunciado):
 
-- ⭐ **Modelos tridimensionais**: em vez de usar os sólidos próprios ou os da TWGL.js, crie ou use modelos tridimensionais de terceiros e carregue-os no seu programa. Um formato simples é o `.obj` (mas ele não suporta animação). Tem também o formato glTF (mais complexo mas suporta animação)
+-  **Modelos tridimensionais**: em vez de usar os sólidos próprios ou os da TWGL.js, crie ou use modelos tridimensionais de terceiros e carregue-os no seu programa. Um formato simples é o `.obj` (mas ele não suporta animação). Tem também o formato glTF (mais complexo mas suporta animação)
   - *Como foi feito:* um parser próprio de `.obj` (`parseObj` em `main.js`) lê posições, normais e coordenadas de textura, triangula faces com mais de 3 vértices e desindexa os vértices. Dois modelos de terceiros são carregados: a **árvore** (`models/tree.obj`) e o **personagem** (`models/personagem.obj`), cada um com a sua textura.
 
 - **Vários tipos de objetos**: Ambiente composto por 7 tipos de objetos diferentes
@@ -47,6 +48,9 @@ Itens opcionais implementados (texto copiado do enunciado):
 
 - **Neblina**: funcionalidade acrescentada por comando do teclado (`N`), podendo ser habilitada e desabilitada durante a execução
   - *Como foi feito:* no fragment shader, névoa por distância (de 8 a 30 unidades do olho) somada a manchas de fumaça geradas por ruído que se deslocam com o tempo, mais densas perto do chão. A cor de fundo acompanha a cor da névoa e o estado aparece no painel.
+ 
+- **Música, efeitos sonoros e/ou som ambiente**: Uma música toca quando o violão é clicado pelo usuário
+  - *Como foi feito:* ao clicar no violão do personagem, toca uma melodia (estilo sea shanty, em ré menor) com acompanhamento grave; clicar de novo para a música. O clique é detectado com object picking: o mouse vira um raio no mundo, que é levado para o espaço do modelo do personagem (desfazendo pose, rotação e escala) e testado contra uma caixa que envolve o violão. O cursor vira uma mãozinha quando o mouse está sobre o violão. O som é sintetizado por código com a Web Audio API (modelo de corda dedilhada de Karplus-Strong), sem arquivos de áudio.
 
 ## (e) Créditos
 
@@ -55,5 +59,6 @@ Recursos de terceiros:
 - **Árvore** (`models/tree.obj`, `colormap.png`): [Kenney](https://kenney.nl) — licença CC0. [PREENCHER: nome do pacote, ex.: Nature Kit, com o link de https://kenney.nl/assets]
 - **Personagem Henry e textura `Atlas_Pirate.png`**: [Kenney — Pirate Kit](https://www.kenney.nl/assets/pirate-kit) — licença CC0.
 - **TWGL.js**: biblioteca de apoio ao WebGL, de Gregg Tavares — [twgljs.org](https://twgljs.org) · [GitHub](https://github.com/greggman/twgl.js).
+- **Música do violão**: gerada por código com o algoritmo de síntese de corda dedilhada Karplus-Strong (K. Karplus e A. Strong, 1983), tocada pela Web Audio API. A melodia é original e não há arquivos de áudio de terceiros — Karplus–Strong string synthesis.
 
 As demais texturas (grama, pedra, madeira, água, telhas, tecido e pokébola) são geradas por código com `canvas`, e os sólidos do cenário e do moinho vêm das primitivas da TWGL.js.
