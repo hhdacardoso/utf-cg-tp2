@@ -153,6 +153,142 @@ function configurarControles(canvas) {
   });
 }
 
+// ---------- Violão do personagem: clique e som ----------
+
+// Caixa (no espaço do modelo) que envolve o violão do personagem, com uma folga
+const VIOLAO_MIN = [-0.01, 0.02, 0.22];
+const VIOLAO_MAX = [0.49, 0.57, 0.92];
+
+// Para tocar um arquivo seu (ex.: "sounds/shanty.mp3") no lugar da melodia gerada
+// pelo código, coloque o caminho aqui. Com null, toca a melodia gerada.
+const ARQUIVO_MUSICA_VIOLAO = null;
+
+// Melodia original em estilo "sea shanty" (compasso 6/8, ré menor).
+// Cada item é [nota MIDI, duração em colcheias].
+const MELODIA_VIOLAO = [
+  [62, 2], [65, 1], [69, 2], [65, 1],
+  [67, 2], [70, 1], [69, 3],
+  [74, 2], [72, 1], [69, 2], [67, 1],
+  [65, 1], [67, 1], [64, 1], [62, 3],
+];
+// Notas graves do acompanhamento: [nota MIDI, colcheia em que entra]
+const BAIXO_VIOLAO = [[50, 0], [43, 6], [50, 12], [45, 18], [50, 21]];
+const DURACAO_COLCHEIA = 0.22; // segundos
+
+let audioCtx = null;
+let audioArquivo = null;
+let fontesSom = [];
+let violaoTocando = false;
+let sessaoSom = 0; // muda a cada início/parada, para o aviso de "terminou" não valer para uma sessão antiga
+
+function notaParaHz(nota) {
+  return 440 * 2 ** ((nota - 69) / 12);
+}
+
+// Corda dedilhada (Karplus-Strong): começa com ruído e a cada volta tira a média de
+// duas amostras vizinhas, o que vai suavizando o som até apagar, como uma corda de verdade
+function criarNotaCorda(ctx, frequencia, segundos) {
+  const taxa = ctx.sampleRate;
+  const buffer = ctx.createBuffer(1, Math.floor(taxa * segundos), taxa);
+  const dados = buffer.getChannelData(0);
+  const atraso = Math.round(taxa / frequencia);
+
+  for (let i = 0; i < atraso; i++) {
+    dados[i] = Math.random() * 2 - 1;
+  }
+  for (let i = atraso; i < dados.length; i++) {
+    dados[i] = 0.996 * 0.5 * (dados[i - atraso] + dados[i - atraso + 1]);
+  }
+  return buffer;
+}
+
+function pararViolao() {
+  sessaoSom++;
+  for (const fonte of fontesSom) {
+    try {
+      fonte.stop();
+    } catch (e) {
+      // nota que já terminou: nada a fazer
+    }
+  }
+  fontesSom = [];
+  if (audioArquivo) audioArquivo.pause();
+  violaoTocando = false;
+}
+
+// Clicar no violão toca a música; clicar de novo para
+function tocarViolao() {
+  if (violaoTocando) {
+    pararViolao();
+    return;
+  }
+  violaoTocando = true;
+  const sessao = ++sessaoSom;
+
+  if (ARQUIVO_MUSICA_VIOLAO) {
+    audioArquivo = audioArquivo || new Audio(ARQUIVO_MUSICA_VIOLAO);
+    audioArquivo.currentTime = 0;
+    audioArquivo.onended = () => {
+      violaoTocando = false;
+    };
+    audioArquivo.play().catch(() => {
+      violaoTocando = false;
+    });
+    return;
+  }
+
+  // O navegador só libera o som depois de um gesto do usuário (o clique)
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  audioCtx.resume();
+  const inicio = audioCtx.currentTime + 0.05;
+  let fim = inicio;
+
+  const agendar = (nota, colcheia, segundos, volume) => {
+    const comeco = inicio + colcheia * DURACAO_COLCHEIA;
+    const fonte = audioCtx.createBufferSource();
+    const ganho = audioCtx.createGain();
+    fonte.buffer = criarNotaCorda(audioCtx, notaParaHz(nota), segundos);
+    ganho.gain.value = volume;
+    fonte.connect(ganho).connect(audioCtx.destination);
+    fonte.start(comeco);
+    fontesSom.push(fonte);
+    fim = Math.max(fim, comeco + segundos);
+  };
+
+  let colcheia = 0;
+  for (const [nota, duracao] of MELODIA_VIOLAO) {
+    agendar(nota, colcheia, 1.2, 0.35);
+    colcheia += duracao;
+  }
+  for (const [nota, entrada] of BAIXO_VIOLAO) {
+    agendar(nota, entrada, 1.8, 0.3);
+  }
+
+  // Quando a última nota acabar, volta ao estado "parado"
+  setTimeout(() => {
+    if (sessao === sessaoSom) violaoTocando = false;
+  }, (fim - audioCtx.currentTime) * 1000);
+}
+
+// Raio × caixa alinhada aos eixos (método dos "slabs"): true se o raio atravessa a caixa
+function raioAcertaCaixa(origem, direcao, min, max) {
+  let tEntrada = 0;
+  let tSaida = Infinity;
+  for (let i = 0; i < 3; i++) {
+    if (Math.abs(direcao[i]) < 1e-9) {
+      if (origem[i] < min[i] || origem[i] > max[i]) return false;
+    } else {
+      let t1 = (min[i] - origem[i]) / direcao[i];
+      let t2 = (max[i] - origem[i]) / direcao[i];
+      if (t1 > t2) [t1, t2] = [t2, t1];
+      tEntrada = Math.max(tEntrada, t1);
+      tSaida = Math.min(tSaida, t2);
+      if (tEntrada > tSaida) return false;
+    }
+  }
+  return true;
+}
+
 // Disco no plano XZ (y = 0), normal +Y, centrado na origem.
 // Triângulos em sentido anti-horário visto de cima (compatível com CULL_FACE).
 function criarDisco(gl, raio, segmentos = 64) {
@@ -759,6 +895,49 @@ async function main() {
   });
   cena.push(personagem);
 
+  // Clique no violão do personagem: toca/para a música.
+  // O mouse vira um raio no mundo, que é levado para o espaço do modelo do personagem
+  // (desfazendo pose, rotação e escala) e testado contra a caixa do violão.
+  let viewProjectionAtual = m4.identity(); // atualizada a cada quadro, no render
+  const mouseNoViolao = (e) => {
+    const retangulo = canvas.getBoundingClientRect();
+    const x = ((e.clientX - retangulo.left) / retangulo.width) * 2 - 1;
+    const y = 1 - ((e.clientY - retangulo.top) / retangulo.height) * 2;
+
+    // Pontos do raio nos planos "perto" e "longe" da projeção, em coordenadas de mundo
+    const inversa = m4.inverse(viewProjectionAtual);
+    const perto = m4.transformPoint(inversa, [x, y, -1]);
+    const longe = m4.transformPoint(inversa, [x, y, 1]);
+
+    const mundo = m4.multiply(
+      criarMatrizModelo(personagem),
+      criarMatrizModelo(personagem.filhos[0])
+    );
+    const mundoInversa = m4.inverse(mundo);
+    const origem = m4.transformPoint(mundoInversa, perto);
+    const alvo = m4.transformPoint(mundoInversa, longe);
+    const direcao = [alvo[0] - origem[0], alvo[1] - origem[1], alvo[2] - origem[2]];
+
+    return raioAcertaCaixa(origem, direcao, VIOLAO_MIN, VIOLAO_MAX);
+  };
+
+  // Só conta como clique se o mouse não foi arrastado (arrastar orbita a câmera 2)
+  let pressionadoEm = null;
+  canvas.addEventListener("pointerdown", (e) => {
+    pressionadoEm = [e.clientX, e.clientY];
+  });
+  canvas.addEventListener("pointerup", (e) => {
+    if (!pressionadoEm) return;
+    const arrastou =
+      Math.hypot(e.clientX - pressionadoEm[0], e.clientY - pressionadoEm[1]) > 5;
+    pressionadoEm = null;
+    if (!arrastou && mouseNoViolao(e)) tocarViolao();
+  });
+  // Mãozinha quando o mouse está sobre o violão
+  canvas.addEventListener("pointermove", (e) => {
+    canvas.style.cursor = mouseNoViolao(e) ? "pointer" : "";
+  });
+
   // Tecla P: avança para a próxima pose
   let poseAtual = 0;
   const hudPose = document.getElementById("pose-atual");
@@ -966,6 +1145,7 @@ cena.push(
     const projection = m4.perspective(Math.PI / 4, aspect, 0.1, 100);
     const olho = calcularOlho(time);
     const viewProjection = m4.multiply(projection, calcularView(olho));
+    viewProjectionAtual = viewProjection;
 
     gl.useProgram(programInfo.program);
     twgl.setUniforms(programInfo, {
