@@ -16,6 +16,12 @@ const ARQUIVOS_OBJ = {
 // Tronco caído: cilindro deitado ao longo do eixo X
 const TRONCO = { x: 0.2, z: 2.0, raio: 0.38, comprimento: 2.0 };
 
+// Cores de fundo: céu normal e fumaça (o fundo vira a cor da fumaça quando a neblina está ligada)
+const CEU_COR = [0.53, 0.81, 0.92];
+const NEBLINA_COR = [0.80, 0.82, 0.85];
+const NEBLINA_INICIO = 8;   // distância (do olho) onde a névoa começa
+const NEBLINA_FIM = 30;     // distância onde tudo vira névoa
+
 // Matriz de modelo a partir de posição, rotação (rad) e escala.
 // Ordem: T * Ry * Rx * Rz * S
 function criarMatrizModelo({ position, rotation, scale }) {
@@ -63,9 +69,10 @@ function criarObjeto({
   color = [1, 1, 1, 1],
   texture = null,
   material = MATERIAL_PADRAO,
+  transparente = false,        // desenhado por último, com mistura (blend)
   filhos = [],
 }) {
-  return { bufferInfo, position, rotation, scale, color, texture, material, filhos };
+  return { bufferInfo, position, rotation, scale, color, texture, material, transparente, filhos };
 }
 
 // ---------- Câmeras ----------
@@ -450,16 +457,16 @@ function criarTexturaTecido(gl) {
 // Água da lagoa: azul com variações de tom e marcas de ondulação
 function criarTexturaAgua(gl) {
   return criarTexturaCanvas(gl, 512, 512, (ctx, w, h) => {
-    ctx.fillStyle = "#2a6fb8";
+    ctx.fillStyle = "#4fa8dc";
     ctx.fillRect(0, 0, w, h);
 
     ctx.globalAlpha = 0.35;
-    espalharManchas(ctx, w, h, 60, 20, 60, ["#3b86d1", "#1f5fa5"]);
+    espalharManchas(ctx, w, h, 60, 20, 60, ["#6cc0ec", "#3d8fc8"]);
 
-    ctx.globalAlpha = 0.3;
+    ctx.globalAlpha = 0.18;
     ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = 2;
-    for (let i = 0; i < 80; i++) {
+    for (let i = 0; i < 50; i++) {
       const x = Math.random() * w;
       const y = Math.random() * h;
       ctx.beginPath();
@@ -690,7 +697,7 @@ async function main() {
 
   gl.enable(gl.DEPTH_TEST); // z-buffer
   gl.enable(gl.CULL_FACE);  // descarta faces de trás (antihorário = frente)
-  gl.clearColor(0.53, 0.81, 0.92, 1.0); // céu azul claro
+  gl.clearColor(...CEU_COR, 1.0); // céu azul claro
   
   twgl.setDefaults({ attribPrefix: "a_" });
   configurarControles(canvas);
@@ -774,6 +781,18 @@ async function main() {
     }
   });
 
+  // Tecla N: liga/desliga a neblina (o fundo acompanha a cor da fumaça)
+  let neblinaLigada = false;
+  const hudNeblina = document.getElementById("neblina-estado");
+  hudNeblina.textContent = "desligada";
+  window.addEventListener("keydown", (e) => {
+    if (e.code === "KeyN") {
+      neblinaLigada = !neblinaLigada;
+      hudNeblina.textContent = neblinaLigada ? "ligada" : "desligada";
+      gl.clearColor(...(neblinaLigada ? NEBLINA_COR : CEU_COR), 1.0);
+    }
+  });
+
   let tempoAnterior = 0;
 
   // ---------- Cenário (primitivas) ----------
@@ -782,14 +801,27 @@ const bufEsfera = twgl.primitives.createSphereBufferInfo(gl, 1, 24, 16);   // ra
 const bufCilindro = twgl.primitives.createCylinderBufferInfo(gl, 1, 1, 24, 1); // raio 1, altura 1
 const bufLagoa = criarDisco(gl, 1, 48);                                    // raio 1
 
-// Lagoa: disco azul um pouco acima do chão (y = 0.02) para evitar z-fighting
+// Lagoa = leito escuro azul-esverdeado (opaco) + água semitransparente por cima.
+// As alturas diferentes (0.01 e 0.03) evitam z-fighting com o chão (y = 0).
 cena.push(
   criarObjeto({
     bufferInfo: bufLagoa,
-    position: [-2.5, 0.02, -1.5],
+    position: [-2.5, 0.01, -1.5],
     scale: [1.8, 1, 1.8], // raio 1.8
+    color: [0.2, 0.42, 0.5, 1], // fundo azul-esverdeado, com pedregulhos da textura
+    texture: texturas.pedra,
+    material: MATERIAIS.pedra,
+  })
+);
+cena.push(
+  criarObjeto({
+    bufferInfo: bufLagoa,
+    position: [-2.5, 0.03, -1.5],
+    scale: [1.8, 1, 1.8],
+    color: [1, 1, 1, 0.55], // alfa 0.55: quanto menor, mais transparente
     texture: texturas.agua,
     material: MATERIAIS.agua,
+    transparente: true,
   })
 );
 
@@ -942,11 +974,28 @@ cena.push(
       u_ambientLight: [1, 1, 1],
       u_viewWorldPosition: olho,
       u_lightingEnabled: luzLigada,
+      u_time: time,
+      u_fogEnabled: neblinaLigada,
+      u_fogColor: NEBLINA_COR,
+      u_fogNear: NEBLINA_INICIO,
+      u_fogFar: NEBLINA_FIM,
     });
 
-    for (const obj of cena) {
+    // 1ª passada: objetos opacos
+    for (const obj of cena.filter((o) => !o.transparente)) {
       desenharObjeto(obj, viewProjection);
     }
+
+    // 2ª passada: transparentes (água). Testam o z-buffer, mas não escrevem nele.
+    gl.enable(gl.BLEND);
+    // Mistura a cor por alfa, mas mantém o alfa do canvas em 1 (senão o fundo da página vaza)
+    gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.depthMask(false);
+    for (const obj of cena.filter((o) => o.transparente)) {
+      desenharObjeto(obj, viewProjection);
+    }
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
 
     moinho.eixo.rotation[2] = time * VELOCIDADE_PAS;
 
