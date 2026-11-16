@@ -24,7 +24,7 @@ Um minimundo em forma de pokébola: um disco gramado sobre um hemisfério branco
 
 ## (c) Media kit
 
-<!-- Adicione de 1 a 3 screenshots em uma pasta (ex.: screenshots/) e ajuste os caminhos abaixo. -->
+<!-- Screenshots em screenshots/: visão geral, personagem sentado e neblina ligada. -->
 
 ![Visão geral do diorama](screenshots/01-visao-geral.png)
 
